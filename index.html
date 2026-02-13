@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>wordle</title>
+    
+
+  </head>
+    
+  <body>
+  <!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom Wordle</title>
+
+  <style>
+    :root {
+      --correct: #538d4e;
+      --present: #b59f3b;
+      --absent: #3a3a3c;
+      --tile-size: min(12vw, 60px);
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui;
+      background: #111;
+      color: white;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 10px;
+    }
+
+    #board {
+      display: grid;
+      grid-template-columns: repeat(5, var(--tile-size));
+      gap: 8px;
+      justify-content: center;
+      margin: 10px;
+    }
+
+    .tile {
+      width: var(--tile-size);
+      height: var(--tile-size);
+      border: 2px solid #444;
+      font-size: calc(var(--tile-size)*0.6);
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #222;
+      text-transform: uppercase;
+      transition: transform .2s;
+    }
+
+    .flip {
+      transform: scaleY(0);
+    }
+
+    .correct {
+      background: var(--correct);
+    }
+
+    .present {
+      background: var(--present);
+    }
+
+    .absent {
+      background: var(--absent);
+    }
+
+    .shake {
+      animation: shake .3s;
+    }
+
+    @keyframes shake {
+
+      0%,
+      100% {
+        transform: translateX(0);
+      }
+
+      25% {
+        transform: translateX(-5px);
+      }
+
+      75% {
+        transform: translateX(5px);
+      }
+    }
+
+    #keyboard {
+      max-width: 600px;
+      margin: auto;
+      padding: 5px;
+    }
+
+    .key {
+      width: 8%;
+      min-width: 32px;
+      margin: 2px;
+      padding: 10px 0;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      background: #333;
+      color: white;
+    }
+
+    .key.correct {
+      background: var(--correct);
+    }
+
+    .key.present {
+      background: var(--present);
+    }
+
+    .key.absent {
+      background: var(--absent);
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .7);
+    }
+
+    .modal-content {
+      background: #222;
+      padding: 20px;
+      margin: 80px auto;
+      width: 90%;
+      max-width: 320px;
+      border-radius: 10px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Custom Wordle</h1>
+  <button onclick="openSettings()">⚙ Settings</button>
+
+  <div id="board"></div>
+  <div id="keyboard"></div>
+
+  <!-- END MODAL -->
+  <div id="endModal" class="modal">
+    <div class="modal-content">
+      <h2 id="endTitle"></h2>
+      <div id="stats"></div>
+      <button onclick="startNewGame()">Continue</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div id="settingsModal" class="modal">
+    <div class="modal-content">
+      <h3>Colors</h3>
+      Correct: <input type="color" id="correctColor"><br><br>
+      Present: <input type="color" id="presentColor"><br><br>
+      Absent: <input type="color" id="absentColor"><br><br>
+      <button onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+
+  <script>
+    // =====================
+    // SETTINGS
+    // =====================
+    let settings = JSON.parse(localStorage.getItem("wordleSettings")) || {
+      correct: "#538d4e",
+      present: "#b59f3b",
+      absent: "#3a3a3c"
+    };
+
+    function applySettings() {
+      document.documentElement.style.setProperty("--correct", settings.correct);
+      document.documentElement.style.setProperty("--present", settings.present);
+      document.documentElement.style.setProperty("--absent", settings.absent);
+      correctColor.value = settings.correct;
+      presentColor.value = settings.present;
+      absentColor.value = settings.absent;
+    }
+    applySettings();
+
+    function openSettings() {
+      settingsModal.style.display = "block";
+    }
+
+    function saveSettings() {
+      settings.correct = correctColor.value;
+      settings.present = presentColor.value;
+      settings.absent = absentColor.value;
+      localStorage.setItem("wordleSettings", JSON.stringify(settings));
+      applySettings();
+      settingsModal.style.display = "none";
+    }
+    settingsModal.onclick = e => {
+      if (e.target.id === "settingsModal") settingsModal.style.display = "none";
+    };
+    // =====================
+    // DICTIONARY (Option 3)
+    // =====================
+    let DICTIONARY = [];
+    fetch("https://raw.githubusercontent.com/tabatkins/wordle-list/main/words")
+      .then(r => r.text())
+      .then(text => {
+        DICTIONARY = text.split("\n");
+        startNewGame();
+      });
+    // =====================
+    // STATS
+    // =====================
+    let stats = JSON.parse(localStorage.getItem("wordleStats")) || {
+      games: 0,
+      wins: 0,
+      streak: 0,
+      best: 0
+    };
+
+    function saveStats() {
+      localStorage.setItem("wordleStats", JSON.stringify(stats));
+    }
+    // =====================
+    // GAME STATE
+    // =====================
+    let target, guess = "",
+      row = 0,
+      gameOver = false;
+    const board = document.getElementById("board");
+    const keyboard = document.getElementById("keyboard");
+    let keyMap = {};
+    // =====================
+    // BUILD UI
+    // =====================
+    function buildBoard() {
+      board.innerHTML = "";
+      for (let i = 0; i < 30; i++) {
+        let t = document.createElement("div");
+        t.className = "tile";
+        board.appendChild(t);
+      }
+    }
+
+    function buildKeyboard() {
+      keyboard.innerHTML = "";
+      keyMap = {};
+      const rows = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+      rows.forEach(r => {
+        r.split("").forEach(letter => {
+          let b = document.createElement("button");
+          b.textContent = letter;
+          b.className = "key";
+          b.onclick = () => type(letter);
+          keyboard.appendChild(b);
+          keyMap[letter.toLowerCase()] = b;
+        });
+        keyboard.appendChild(document.createElement("br"));
+      });
+      let enter = document.createElement("button");
+      enter.textContent = "ENTER";
+      enter.className = "key";
+      enter.style.width = "18%";
+      enter.onclick = submitGuess;
+      keyboard.appendChild(enter);
+      let back = document.createElement("button");
+      back.textContent = "⌫";
+      back.className = "key";
+      back.style.width = "18%";
+      back.onclick = backspace;
+      keyboard.appendChild(back);
+    }
+
+    function randomWord() {
+      return DICTIONARY[Math.floor(Math.random() * DICTIONARY.length)];
+    }
+    // =====================
+    // GAME START
+    // =====================
+    function startNewGame() {
+      endModal.style.display = "none";
+      target = randomWord();
+      guess = "";
+      row = 0;
+      gameOver = false;
+      buildBoard();
+      buildKeyboard();
+    }
+    // =====================
+    // INPUT
+    // =====================
+    function type(letter) {
+      if (gameOver) return;
+      if (guess.length < 5) {
+        guess += letter.toLowerCase();
+        updateRow();
+      }
+    }
+
+    function backspace() {
+      if (gameOver) return;
+      guess = guess.slice(0, -1);
+      updateRow();
+    }
+
+    function updateRow() {
+      for (let i = 0; i < 5; i++) {
+        board.children[row * 5 + i].textContent = guess[i] || "";
+      }
+    }
+    // =====================
+    // GUESS CHECK
+    // =====================
+    function submitGuess() {
+      if (gameOver) return;
+      if (guess.length !== 5 || !DICTIONARY.includes(guess)) {
+        shakeRow();
+        return;
+      }
+      let targetArr = target.split("");
+      let guessArr = guess.split("");
+      let results = new Array(5);
+      for (let i = 0; i < 5; i++) {
+        if (guessArr[i] === targetArr[i]) {
+          results[i] = "correct";
+          targetArr[i] = null;
+          guessArr[i] = null;
+        }
+      }
+      for (let i = 0; i < 5; i++) {
+        if (guessArr[i]) {
+          if (targetArr.includes(guessArr[i])) {
+            results[i] = "present";
+            targetArr[targetArr.indexOf(guessArr[i])] = null;
+          } else results[i] = "absent";
+        }
+      }
+      // animate reveal
+      let guessCopy = guess; // save before clearing
+      results.forEach((type, i) => {
+        let tile = board.children[row * 5 + i];
+        setTimeout(() => {
+          tile.classList.add("flip");
+          setTimeout(() => {
+            tile.classList.remove("flip");
+            tile.classList.add(type);
+            updateKeyboard(guessCopy[i], type);
+          }, 150);
+        }, i * 250);
+      });
+      if (guess === target) {
+        setTimeout(() => endGame(true), 1500);
+        return;
+      }
+      row++;
+      guess = "";
+      if (row === 6) setTimeout(() => endGame(false), 1500);
+    }
+    // keyboard coloring priority
+    const priority = {
+      correct: 3,
+      present: 2,
+      absent: 1
+    };
+
+    function updateKeyboard(letter, type) {
+      let key = keyMap[letter];
+      if (!key) return;
+      let existing = key.dataset.state;
+      if (existing && priority[existing] >= priority[type]) return;
+      key.dataset.state = type;
+      key.classList.remove("correct", "present", "absent");
+      key.classList.add(type);
+    }
+
+    function shakeRow() {
+      for (let i = 0; i < 5; i++)
+        board.children[row * 5 + i].classList.add("shake");
+      setTimeout(() => {
+        for (let i = 0; i < 5; i++)
+          board.children[row * 5 + i].classList.remove("shake");
+      }, 300);
+    }
+    // =====================
+    // END GAME
+    // =====================
+    function endGame(win) {
+      gameOver = true;
+      stats.games++;
+      if (win) {
+        stats.wins++;
+        stats.streak++;
+        stats.best = Math.max(stats.best, stats.streak);
+      } else stats.streak = 0;
+      saveStats();
+      endTitle.textContent = win ? "You Win!" : "Word: " + target;
+      document.getElementById("stats").innerHTML = `
+    Games: ${stats.games}<br>
+    Wins: ${stats.wins}<br>
+    Current Streak: ${stats.streak}<br>
+    Best Streak: ${stats.best}
+  `;
+      endModal.style.display = "block";
+    }
+    // =====================
+    // KEYBOARD INPUT
+    // =====================
+    document.addEventListener("keydown", e => {
+      if (e.key === "Enter") submitGuess();
+      else if (e.key === "Backspace") backspace();
+      else if (/^[a-zA-Z]$/.test(e.key)) type(e.key.toUpperCase());
+    });
+  </script>
+
+</body>
+
+</html>
+    
+  </body>
+  
+</html>
